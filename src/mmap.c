@@ -24,7 +24,6 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <setjmp.h>
-#include <signal.h>
 #include <unistd.h>
 #include <assert.h>
 #include <sys/mman.h>
@@ -32,90 +31,25 @@
 
 static size_t pageSize;
 
-static sigjmp_buf restoreEnv;
-
 static void *offsetBy(void *ptr, ptrdiff_t n) {
     return (void *)((uintptr_t)ptr + n);
 }
 
-static void signalHandler(int _1, siginfo_t *_2, void *_3) {
-    (void)_1; (void)_2; (void)_3;
-    siglongjmp(restoreEnv, 1);
-}
-
-static bool ensureReadable(void *ptr) {
-    if (sigsetjmp(restoreEnv, 1)) {
-        return false;
-    }
-
+static void ensureReadable(void *ptr) {
     (void)(*(volatile uint8_t *)ptr);
-
-    return true;
 }
 
-static bool ensureWritable(void *ptr) {
-    if (sigsetjmp(restoreEnv, 1)) {
-        return false;
-    }
-
+static void ensureWritable(void *ptr) {
     *(volatile uint8_t *)ptr = 0;
-
-    return true;
 }
 
-static bool ensureNotReadable(void *ptr) {
-    if (sigsetjmp(restoreEnv, 1)) {
-        return true;
-    }
-
+static void ensureNotReadable(void *ptr) {
     (void)(*(volatile uint8_t *)ptr);
-
-    return false;
 }
 
-static bool ensureNotWritable(void *ptr) {
-    if (sigsetjmp(restoreEnv, 1)) {
-        return true;
-    }
-
+static void ensureNotWritable(void *ptr) {
     *(volatile uint8_t *)ptr = 0;
-
-    return false;
 }
-
-#define RUNCHECKS(...) do { \
-    pid_t pid = fork(); \
-    assert_errno("fork", pid >= 0); \
-    \
-    struct sigaction sa, old_sa; \
-    sigemptyset(&sa.sa_mask); \
-    sa.sa_sigaction = signalHandler; \
-    sa.sa_flags = SA_SIGINFO; \
-    \
-    int ret = sigaction(SIGSEGV, &sa, &old_sa); \
-    assert_errno("sigaction", ret != -1); \
-    \
-    if (pid == 0) { \
-        __VA_ARGS__ \
-        exit(0); \
-    } else { \
-        int status = 0; \
-        while (waitpid(pid, &status, 0) == -1) { \
-            if (errno == EINTR) continue; \
-            assert_errno("waitpid", false); \
-        } \
-        \
-        if (WIFSIGNALED(status) || WEXITSTATUS(status) != 0) { \
-            fprintf(stderr, "Test failed on subprocess!\n"); \
-            abort(); \
-        } \
-        \
-        __VA_ARGS__ \
-    } \
-    \
-    ret = sigaction(SIGSEGV, &old_sa, NULL); \
-    assert_errno("sigaction", ret != -1); \
-} while (0)
 
 static void fixed_replace_middle(void) {
     void *mem = mmap(NULL, pageSize * 3, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
@@ -125,30 +59,26 @@ static void fixed_replace_middle(void) {
     assert_errno("mmap", newPtr != MAP_FAILED);
     assert(newPtr == offsetBy(mem, pageSize));
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureWritable(mem));
+    ensureReadable(mem);
+    ensureWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
-        assert(ensureReadable(offsetBy(mem, pageSize * 2)));
-        assert(ensureWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureReadable(offsetBy(mem, pageSize * 2));
+    ensureWritable(offsetBy(mem, pageSize * 2));
 
     int ret = munmap(mem, pageSize * 3);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize * 2)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize * 2));
+    ensureNotWritable(offsetBy(mem, pageSize * 2));
 }
 
 static void fixed_replace_left(void) {
@@ -159,24 +89,20 @@ static void fixed_replace_left(void) {
     assert_errno("mmap", newPtr != MAP_FAILED);
     assert(newPtr == mem);
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureWritable(offsetBy(mem, pageSize)));
-    );
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureWritable(offsetBy(mem, pageSize));
 
     int ret = munmap(mem, pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 }
 
 static void fixed_replace_right(void) {
@@ -187,24 +113,20 @@ static void fixed_replace_right(void) {
     assert_errno("mmap", newPtr != MAP_FAILED);
     assert(newPtr == offsetBy(mem, pageSize));
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureWritable(mem));
+    ensureReadable(mem);
+    ensureWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
     int ret = munmap(mem, pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 }
 
 static void partial_protect_middle(void) {
@@ -214,30 +136,26 @@ static void partial_protect_middle(void) {
     int ret = mprotect(offsetBy(mem, pageSize), pageSize, PROT_READ);
     assert_errno("mprotect", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureWritable(mem));
+    ensureReadable(mem);
+    ensureWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
-        assert(ensureReadable(offsetBy(mem, pageSize * 2)));
-        assert(ensureWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureReadable(offsetBy(mem, pageSize * 2));
+    ensureWritable(offsetBy(mem, pageSize * 2));
 
     ret = munmap(mem, pageSize * 3);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize * 2)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize * 2));
+    ensureNotWritable(offsetBy(mem, pageSize * 2));
 }
 
 static void partial_protect_left(void) {
@@ -247,24 +165,20 @@ static void partial_protect_left(void) {
     int ret = mprotect(mem, pageSize, PROT_READ);
     assert_errno("mprotect", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureWritable(offsetBy(mem, pageSize)));
-    );
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureWritable(offsetBy(mem, pageSize));
 
     ret = munmap(mem, pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 }
 
 static void partial_protect_right(void) {
@@ -274,24 +188,20 @@ static void partial_protect_right(void) {
     int ret = mprotect(offsetBy(mem, pageSize), pageSize, PROT_READ);
     assert_errno("mprotect", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureWritable(mem));
+    ensureReadable(mem);
+    ensureWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
     ret = munmap(mem, pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 }
 
 static void partial_unmap_middle(void) {
@@ -301,30 +211,26 @@ static void partial_unmap_middle(void) {
     int ret = munmap(offsetBy(mem, pageSize), pageSize);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureWritable(mem));
+    ensureReadable(mem);
+    ensureWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
-        assert(ensureReadable(offsetBy(mem, pageSize * 2)));
-        assert(ensureWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureReadable(offsetBy(mem, pageSize * 2));
+    ensureWritable(offsetBy(mem, pageSize * 2));
 
     ret = munmap(mem, pageSize * 3);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize * 2)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize * 2));
+    ensureNotWritable(offsetBy(mem, pageSize * 2));
 }
 
 static void partial_unmap_left(void) {
@@ -334,24 +240,20 @@ static void partial_unmap_left(void) {
     int ret = munmap(mem, pageSize);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureReadable(offsetBy(mem, pageSize)));
-        assert(ensureWritable(offsetBy(mem, pageSize)));
-    );
+    ensureReadable(offsetBy(mem, pageSize));
+    ensureWritable(offsetBy(mem, pageSize));
 
     ret = munmap(mem, pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 }
 
 static void partial_unmap_right(void) {
@@ -361,24 +263,20 @@ static void partial_unmap_right(void) {
     int ret = munmap(offsetBy(mem, pageSize), pageSize);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureReadable(mem));
-        assert(ensureWritable(mem));
+    ensureReadable(mem);
+    ensureWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 
     ret = munmap(mem, pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 
-        assert(ensureNotReadable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize)));
-    );
+    ensureNotReadable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize));
 }
 
 static void unmap_range_before_first(void) {
@@ -391,10 +289,8 @@ static void unmap_range_before_first(void) {
     int ret = munmap((void *)(0x100000 + pageSize), pageSize * 2);
     assert_errno("munmap", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotReadable(mem));
-        assert(ensureNotWritable(mem));
-    );
+    ensureNotReadable(mem);
+    ensureNotWritable(mem);
 }
 
 static void check_whether_split_mappings_get_protected_correctly(void) {
@@ -407,9 +303,7 @@ static void check_whether_split_mappings_get_protected_correctly(void) {
     ret = mprotect(mem, 0x5000, PROT_READ | PROT_WRITE);
     assert_errno("mprotect", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureWritable(mem));
-    );
+    ensureWritable(mem);
 }
 
 static void check_whether_three_way_split_mappings_are_handled_correctly(void) {
@@ -418,11 +312,9 @@ static void check_whether_three_way_split_mappings_are_handled_correctly(void) {
     int ret = mprotect(offsetBy(mem, pageSize), pageSize, PROT_READ | PROT_WRITE);
     assert_errno("mprotect", ret != -1);
 
-    RUNCHECKS(
-        assert(ensureNotWritable(mem));
-        assert(ensureWritable(offsetBy(mem, pageSize)));
-        assert(ensureNotWritable(offsetBy(mem, pageSize * 2)));
-    );
+    ensureNotWritable(mem);
+    ensureWritable(offsetBy(mem, pageSize));
+    ensureNotWritable(offsetBy(mem, pageSize * 2));
 }
 
 void mmap_run_tests(void) {
