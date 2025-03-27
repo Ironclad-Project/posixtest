@@ -18,7 +18,24 @@
 
 #pragma once
 
-int test_mmap_anon(void);
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <string.h>
+
+void mmap_run_tests(void);
+
 int test_dgram_simple(void);
 int test_dgram_fd(void);
 int test_stream_simple(void);
+
+#define assert_errno(fail_func, expr) ((void)(((expr) ? 1 : 0) || (assert_errno_fail(fail_func, #expr, __FILE__, __PRETTY_FUNCTION__, __LINE__), 0)))
+
+static inline void assert_errno_fail(const char *fail_func, const char *expr,
+        const char *file, const char *func, int line) {
+    int err = errno;
+    fprintf(stderr, "In function %s, file %s:%d: Function %s failed with error '%s'; failing assertion: '%s'\n",
+            func, file, line, fail_func, strerror(err), expr);
+    abort();
+    __builtin_unreachable();
+}

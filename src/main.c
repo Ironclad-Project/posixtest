@@ -30,7 +30,8 @@ const char *pass_str = "\e[1;32mPASSED\e[0m";
 const char *fail_str = "\e[1;31mFAILED\e[0m";
 
 int main(void) {
-    printf("MAP_ANON:                   %s\n", test_mmap_anon()     ? pass_str : fail_str);
+    mmap_run_tests();
+
     printf("SOCK_STREAM simple message: %s\n", test_stream_simple() ? pass_str : fail_str);
     printf("SOCK_DGRAM simple message:  %s\n", test_dgram_simple()  ? pass_str : fail_str);
     printf("SOCK_DGRAM passing an fd:   %s\n", test_dgram_fd()      ? pass_str : fail_str);
